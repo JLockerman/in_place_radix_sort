@@ -1,0 +1,11 @@
+[package]
+name = "in_place_radix"
+version = "0.1.0"
+authors = ["Joshua Lockerman <>"]
+
+[dependencies]
+byteorder = "1.2"
+
+[dev-dependencies]
+is_sorted = "0.1"
+rand = "0.5"
