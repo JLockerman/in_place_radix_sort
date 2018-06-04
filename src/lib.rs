@@ -4,12 +4,17 @@ extern crate byteorder;
 use byteorder::{BigEndian, ByteOrder};
 
 pub fn sort<T>(array: &mut [T], key: impl FnMut(&mut T) -> u64 + Copy) {
+    let mut memory: Vec<[usize; 256]> = Vec::with_capacity(8 * 2);
+    unsafe { memory.set_len(8 * 2) }
+    let (histograms, starts) = memory.split_at_mut(8);
     //TODO better alloc?
-    sort_level(array, 0, key)
+    sort_level(array, histograms, starts, 0, key)
 }
 
 fn sort_level<T>(
     array: &mut [T],
+    histograms: &mut [[usize; 256]],
+    starts: &mut [[usize; 256]],
     level: u8,
     key: impl FnMut(&mut T) -> u64 + Copy,
 ) {
@@ -17,67 +22,69 @@ fn sort_level<T>(
         return
     }
 
-    let mut histogram = vec![0; 256];
-    let mut starts = vec![0; 256];
-    assert_eq!(starts.len(), histogram.len());
+    assert_eq!(starts.len(), histograms.len());
+    let (histogram, histograms) = histograms.split_first_mut().unwrap();
+    let (start, starts) = starts.split_first_mut().unwrap();
+
+    *histogram = [0; 256];
 
     let mut byte = key_at_level(level, key);
 
     for item in &mut *array {
         histogram[byte(item) as usize] += 1;
     }
-    starts[0] = 0;
-    for i in 1..starts.len() {
-        starts[i] = starts[i - 1] + histogram[i - 1];
+    start[0] = 0;
+    for i in 1..start.len() {
+        start[i] = start[i - 1] + histogram[i - 1];
     }
     let mut used = BitSet::new();
-    let mut ends = histogram;
+    let ends = histogram;
     for i in 0..ends.len() {
-        ends[i] += starts[i];
-        if ends[i] != starts[i] { 
+        ends[i] += start[i];
+        if ends[i] != start[i] { 
             used.set(i as u8)
         }
     }
 
     while !used.is_empty() {
         let i = used.take_next() as usize;
-        while starts[i] < ends[i] {
+        while start[i] < ends[i] {
             'swap: loop {
-                let b = byte(&mut array[starts[i]]) as usize;
+                let b = byte(&mut array[start[i]]) as usize;
                 if b == i {
                     break 'swap
                 }
-                array.swap(starts[i], starts[b]);
-                starts[b] += 1;
-                debug_assert!(starts[b] <= ends[b]);
+                array.swap(start[i], start[b]);
+                start[b] += 1;
+                debug_assert!(start[b] <= ends[b]);
             }
-            starts[i] += 1;
+            start[i] += 1;
         }
     }
 
     // for i in 0..ends.len() {
-    //     while starts[i] < ends[i] {
+    //     while start[i] < ends[i] {
     //         'swap: loop {
-    //             let b = byte(&mut array[starts[i]]) as usize;
+    //             let b = byte(&mut array[start[i]]) as usize;
     //             if b == i {
     //                 break 'swap
     //             }
-    //             array.swap(starts[i], starts[b]);
-    //             starts[b] += 1;
-    //             debug_assert!(starts[b] <= ends[b]);
+    //             array.swap(start[i], start[b]);
+    //             start[b] += 1;
+    //             debug_assert!(start[b] <= ends[b]);
     //         }
-    //         starts[i] += 1;
+    //         start[i] += 1;
     //     }
     // }
 
     if level < 7 {
-        starts[0] = 0;
-        for i in 1..starts.len() {
-            starts[i] = ends[i - 1];
+        start[0] = 0;
+        for i in 1..start.len() {
+            start[i] = ends[i - 1];
         }
-        for i in 0..starts.len() {
-            if starts[i] == ends[i] { continue }
-            sort_level(&mut array[starts[i]..ends[i]], level + 1, key);
+        for i in 0..start.len() {
+            if start[i] == ends[i] { continue }
+            sort_level(&mut array[start[i]..ends[i]], histograms, starts, level + 1, key);
         }
     }
 }
