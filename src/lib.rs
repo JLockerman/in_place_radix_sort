@@ -30,16 +30,20 @@ fn sort_level<T>(
     for i in 1..starts.len() {
         starts[i] = starts[i - 1] + histogram[i - 1];
     }
+    let mut used = BitSet::new();
     let mut ends = histogram;
     for i in 0..ends.len() {
         ends[i] += starts[i];
+        if ends[i] != starts[i] { 
+            used.set(i as u8)
+        }
     }
 
-    for i in 0..ends.len() {
+    while !used.is_empty() {
+        let i = used.take_next() as usize;
         while starts[i] < ends[i] {
             'swap: loop {
                 let b = byte(&mut array[starts[i]]) as usize;
-                println!("{} 0x{:2x} 0x{:2x}", level, i, b);
                 if b == i {
                     break 'swap
                 }
@@ -50,10 +54,21 @@ fn sort_level<T>(
             starts[i] += 1;
         }
     }
-    
 
-    println!("start {:?}", starts);
-    println!("  end {:?}\n", ends);
+    // for i in 0..ends.len() {
+    //     while starts[i] < ends[i] {
+    //         'swap: loop {
+    //             let b = byte(&mut array[starts[i]]) as usize;
+    //             if b == i {
+    //                 break 'swap
+    //             }
+    //             array.swap(starts[i], starts[b]);
+    //             starts[b] += 1;
+    //             debug_assert!(starts[b] <= ends[b]);
+    //         }
+    //         starts[i] += 1;
+    //     }
+    // }
 
     if level < 7 {
         starts[0] = 0;
@@ -78,6 +93,7 @@ fn key_at_level<T>(level: u8, mut key: impl FnMut(&mut T) -> u64) -> impl FnMut(
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 struct BitSet {
     high: u128,
     low: u128,
@@ -104,9 +120,9 @@ impl BitSet {
     fn take_next(&mut self) -> u8 {
         let (bits, add) =
             if self.low == 0 { (&mut self.high, 128) } else { (&mut self.low, 0) };
-        let ret = bits.trailing_zeros() as u8;
-        *bits &= !(1 << (ret + 1));
-        ret + add
+        let shift = bits.trailing_zeros() as u8;
+        *bits &= !(1 << shift);
+        shift + add
     }
 }
 
@@ -143,10 +159,9 @@ pub mod tests {
     }
 
     #[test]
-    fn small() {
+    fn small_const() {
         let mut vals = [1u64, 0, 22, 5, 36, 2, 1111, 1112, 44];
         sort(&mut vals, |v| *v);
-        println!("{:?}", vals);
         assert!(vals.iter().is_sorted());
     }
 
@@ -167,11 +182,11 @@ pub mod tests {
         assert!(vals.iter().is_sorted());
     }
 
-    // #[test]
-    // fn med_random() {
-    //     let mut vals: Vec<u64> = (0..1_000_000).map(|_| random()).collect();
-    //     sort(&mut vals, |v| *v);
-    //     vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{} <= {}", w[0], w[1]));
-    //     assert!(vals.iter().is_sorted());
-    // }
+    #[test]
+    fn med_random() {
+        let mut vals: Vec<u64> = (0..10_000_000).map(|_| random()).collect();
+        sort(&mut vals, |v| *v);
+        vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{} <= {}", w[0], w[1]));
+        assert!(vals.iter().is_sorted());
+    }
 }
