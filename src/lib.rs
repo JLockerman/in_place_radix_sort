@@ -3,11 +3,10 @@ extern crate byteorder;
 
 use byteorder::{BigEndian, ByteOrder};
 
-pub fn sort<T>(array: &mut [T], key: impl FnMut(&mut T) -> u64 + Copy) {
+pub fn sort<T>(array: &mut [T], key: impl FnMut(&T) -> u64 + Copy) {
     let mut memory: Vec<[usize; 256]> = Vec::with_capacity(8 * 2);
     unsafe { memory.set_len(8 * 2) }
     let (histograms, starts) = memory.split_at_mut(8);
-    //TODO better alloc?
     sort_level(array, histograms, starts, 0, key)
 }
 
@@ -16,19 +15,19 @@ fn sort_level<T>(
     histograms: &mut [[usize; 256]],
     starts: &mut [[usize; 256]],
     level: u8,
-    key: impl FnMut(&mut T) -> u64 + Copy,
+    key: impl FnMut(&T) -> u64 + Copy,
 ) {
     if array.len() <= 1 {
         return
     }
+
+    let mut byte = key_at_level(level, key);
 
     assert_eq!(starts.len(), histograms.len());
     let (histogram, histograms) = histograms.split_first_mut().unwrap();
     let (start, starts) = starts.split_first_mut().unwrap();
 
     *histogram = [0; 256];
-
-    let mut byte = key_at_level(level, key);
 
     for item in &mut *array {
         histogram[byte(item) as usize] += 1;
@@ -37,51 +36,30 @@ fn sort_level<T>(
     for i in 1..start.len() {
         start[i] = start[i - 1] + histogram[i - 1];
     }
-    let mut used = BitSet::new();
     let ends = histogram;
     for i in 0..ends.len() {
         ends[i] += start[i];
-        if ends[i] != start[i] { 
-            used.set(i as u8)
-        }
     }
 
-    while !used.is_empty() {
-        let i = used.take_next() as usize;
-        while start[i] < ends[i] {
+    for dx in 0..start.len() {
+        let i = dx as u8;
+        while start[dx] < ends[dx] {
             'swap: loop {
-                let b = byte(&mut array[start[i]]) as usize;
+                let b = byte(&mut array[start[dx]]);
                 if b == i {
                     break 'swap
                 }
-                array.swap(start[i], start[b]);
-                start[b] += 1;
-                debug_assert!(start[b] <= ends[b]);
+                array.swap(start[dx], start[b as usize]);
+                start[b as usize] += 1;
+                debug_assert!(start[b as usize] <= ends[b as usize]);
             }
-            start[i] += 1;
+            start[dx] += 1;
         }
     }
 
-    // for i in 0..ends.len() {
-    //     while start[i] < ends[i] {
-    //         'swap: loop {
-    //             let b = byte(&mut array[start[i]]) as usize;
-    //             if b == i {
-    //                 break 'swap
-    //             }
-    //             array.swap(start[i], start[b]);
-    //             start[b] += 1;
-    //             debug_assert!(start[b] <= ends[b]);
-    //         }
-    //         start[i] += 1;
-    //     }
-    // }
-
     if level < 7 {
         start[0] = 0;
-        for i in 1..start.len() {
-            start[i] = ends[i - 1];
-        }
+        start[1..].copy_from_slice(&ends[..255]);
         for i in 0..start.len() {
             if start[i] == ends[i] { continue }
             sort_level(&mut array[start[i]..ends[i]], histograms, starts, level + 1, key);
@@ -90,7 +68,7 @@ fn sort_level<T>(
 }
 
 #[inline(always)]
-fn key_at_level<T>(level: u8, mut key: impl FnMut(&mut T) -> u64) -> impl FnMut(&mut T) -> u8 {
+fn key_at_level<T>(level: u8, mut key: impl FnMut(&T) -> u64) -> impl FnMut(&T) -> u8 {
     // move |t| ((key(t) >> level) & 0xff) as u8
     move |t| { 
         let mut bytes = [0; 8];
@@ -100,7 +78,7 @@ fn key_at_level<T>(level: u8, mut key: impl FnMut(&mut T) -> u64) -> impl FnMut(
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BitSet {
     high: u128,
     low: u128,
@@ -112,6 +90,7 @@ impl BitSet {
         BitSet { low: 0, high: 0 }
     }
 
+    #[inline(always)]
     fn set(&mut self, key: u8) {
         if key < 128 {
             self.low |= 1 << (key % 128)
@@ -120,10 +99,12 @@ impl BitSet {
         }
     }
 
+    #[inline(always)]
     fn is_empty(&self) -> bool {
         self.low == 0 && self.high == 0
     }
 
+    #[inline(always)]
     fn take_next(&mut self) -> u8 {
         let (bits, add) =
             if self.low == 0 { (&mut self.high, 128) } else { (&mut self.low, 0) };
