@@ -69,6 +69,12 @@ where T: Byter + Ord {
     sort_by(array, <T as Byter>::LEVELS, |k, l| <T as Byter>::bytes(k, l))
 }
 
+pub fn sort_by_key<T, K>(array: &mut [T], mut key: impl FnMut(&T) -> &K + Copy)
+where T: Ord, K: Byter {
+    sort_by(array, <K as Byter>::LEVELS, move |t, l| <K as Byter>::bytes(key(t), l))
+}
+
+#[inline]
 pub fn sort_by<T>(array: &mut [T], num_levels: usize, key: impl FnMut(&T, usize) -> u8 + Copy)
 where T: Ord {
     let mut tables = Cache::with_capacity(num_levels * 2);
@@ -306,6 +312,18 @@ pub mod tests {
         }
         println!("{:?}", vals);
         vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{} <= {}", w[0], w[1]));
+        assert!(vals.iter().is_sorted());
+    }
+
+
+     #[test]
+    fn stable() {
+        let mut i = 0;
+        let mut vals: Vec<(u64, u64)> = (0..10_000_000).map(|_| {
+            i += 1;
+            (random(), i)
+        }).collect();
+        sort_by_key(&mut vals, |&(ref k,_)| k);
         assert!(vals.iter().is_sorted());
     }
 }
