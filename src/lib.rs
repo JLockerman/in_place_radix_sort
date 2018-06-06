@@ -3,7 +3,60 @@ extern crate byteorder;
 
 use byteorder::{BigEndian, ByteOrder};
 
-pub fn sort<T>(array: &mut [T], key: impl FnMut(&T) -> u64 + Copy) {
+pub trait Byter {
+    const START_LEVEL: u8;
+    fn bytes(&self) -> u64;
+}
+
+impl Byter for u64 {
+    const START_LEVEL: u8 = 0;
+    #[inline(always)]
+    fn bytes(&self) -> u64 {
+        *self
+    }
+}
+
+impl Byter for usize {
+    //TODO dynamic set
+    const START_LEVEL: u8 = 0;
+    #[inline(always)]
+    fn bytes(&self) -> u64 {
+        *self as u64
+    }
+}
+
+impl Byter for u32 {
+    const START_LEVEL: u8 = 4;
+    #[inline(always)]
+    fn bytes(&self) -> u64 {
+        *self as u64
+    }
+}
+
+impl Byter for u16 {
+    const START_LEVEL: u8 = 6;
+    #[inline(always)]
+    fn bytes(&self) -> u64 {
+        *self as u64
+    }
+}
+
+impl Byter for u8 {
+    const START_LEVEL: u8 = 7;
+    #[inline(always)]
+    fn bytes(&self) -> u64 {
+        *self as u64
+    }
+}
+
+pub fn sort<T: Byter>(array: &mut [T]) {
+    let mut memory: Vec<[usize; 256]> = Vec::with_capacity(8 * 2);
+    unsafe { memory.set_len(8 * 2) }
+    let (histograms, starts) = memory.split_at_mut(8);
+    sort_level(array, histograms, starts, <T as Byter>::START_LEVEL, <T as Byter>::bytes)
+}
+
+pub fn sort_by<T>(array: &mut [T], key: impl FnMut(&T) -> u64 + Copy) {
     let mut memory: Vec<[usize; 256]> = Vec::with_capacity(8 * 2);
     unsafe { memory.set_len(8 * 2) }
     let (histograms, starts) = memory.split_at_mut(8);
@@ -15,7 +68,7 @@ fn sort_level<T>(
     histograms: &mut [[usize; 256]],
     starts: &mut [[usize; 256]],
     level: u8,
-    key: impl FnMut(&T) -> u64 + Copy,
+    mut key: impl FnMut(&T) -> u64 + Copy,
 ) {
     if array.len() <= 1 {
         return
@@ -32,10 +85,12 @@ fn sort_level<T>(
     for item in &mut *array {
         histogram[byte(item) as usize] += 1;
     }
+
     start[0] = 0;
     for i in 1..start.len() {
         start[i] = start[i - 1] + histogram[i - 1];
     }
+
     let ends = histogram;
     for i in 0..ends.len() {
         ends[i] += start[i];
@@ -43,7 +98,7 @@ fn sort_level<T>(
 
     for dx in 0..start.len() {
         let i = dx as u8;
-        while start[dx] < ends[dx] {
+        'search: while start[dx] < ends[dx] {
             'swap: loop {
                 let b = byte(&mut array[start[dx]]);
                 if b == i {
@@ -62,7 +117,53 @@ fn sort_level<T>(
         start[1..].copy_from_slice(&ends[..255]);
         for i in 0..start.len() {
             if start[i] == ends[i] { continue }
-            sort_level(&mut array[start[i]..ends[i]], histograms, starts, level + 1, key);
+            if start[i] + 1 == ends[i] { continue }
+            let array = &mut array[start[i]..ends[i]];
+            if array.len() == 2 {
+                if key(&array[0]) > key(&array[1]) {
+                    array.swap(0, 1);
+                }
+                continue
+            }
+            if array.len() == 3 {
+                let mut swap_if_needed = |i, j| if key(&array[i]) > key(&array[j]) {
+                    array.swap(i, j);
+                };
+                swap_if_needed(0, 1);
+                swap_if_needed(0, 2);
+                swap_if_needed(1, 2);
+                continue
+            }
+            if array.len() == 4 {
+                let mut swap_if_needed = |i, j| if key(&array[i]) > key(&array[j]) {
+                    array.swap(i, j);
+                };
+                swap_if_needed(0, 1);
+                swap_if_needed(2, 3);
+                swap_if_needed(0, 2);
+                swap_if_needed(1, 3);
+                swap_if_needed(1, 2);
+                continue
+            }
+            // if array.len() == 8 {
+            //     let mut swap_if_needed = |i, j| if key(&array[i]) > key(&array[j]) {
+            //         array.swap(i, j);
+            //     };
+            //     swap_if_needed(0, 4);
+            //     swap_if_needed(1, 5);
+            //     swap_if_needed(2, 6);
+            //     swap_if_needed(3, 7);
+            //     swap_if_needed(0, 2);
+            //     swap_if_needed(1, 3);
+            //     swap_if_needed(4, 6);
+            //     swap_if_needed(5, 7);
+            //     swap_if_needed(0, 1);
+            //     swap_if_needed(2, 3);
+            //     swap_if_needed(4, 5);
+            //     swap_if_needed(6, 7);
+            //     continue
+            // }
+            sort_level(array, histograms, starts, level + 1, key);
         }
     }
 }
@@ -149,7 +250,7 @@ pub mod tests {
     #[test]
     fn small_const() {
         let mut vals = [1u64, 0, 22, 5, 36, 2, 1111, 1112, 44];
-        sort(&mut vals, |v| *v);
+        sort(&mut vals);
         assert!(vals.iter().is_sorted());
     }
 
@@ -157,7 +258,7 @@ pub mod tests {
     fn small_random() {
         let mut rng = thread_rng();
         let mut vals: Vec<u64> = (0..100).map(|_| rng.gen_range(0, 10000)).collect();
-        sort(&mut vals, |v| *v);
+        sort(&mut vals);
         vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{} <= {}", w[0], w[1]));
         assert!(vals.iter().is_sorted());
     }
@@ -165,7 +266,7 @@ pub mod tests {
     #[test]
     fn small_random2() {
         let mut vals: Vec<u64> = (0..1000).map(|_| random()).collect();
-        sort(&mut vals, |v| *v);
+        sort(&mut vals);
         vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{} <= {}", w[0], w[1]));
         assert!(vals.iter().is_sorted());
     }
@@ -173,7 +274,7 @@ pub mod tests {
     #[test]
     fn med_random() {
         let mut vals: Vec<u64> = (0..10_000_000).map(|_| random()).collect();
-        sort(&mut vals, |v| *v);
+        sort(&mut vals);
         vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{} <= {}", w[0], w[1]));
         assert!(vals.iter().is_sorted());
     }
