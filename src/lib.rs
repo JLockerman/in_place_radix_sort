@@ -11,67 +11,20 @@ use std::{
 use byteorder::{BigEndian, ByteOrder};
 
 pub trait Byter {
-    const LEVELS: usize;
     fn bytes(&self, usize) -> u8;
-}
-
-impl Byter for u64 {
-    const LEVELS: usize = size_of::<Self>();
-    #[inline(always)]
-    fn bytes(&self, level: usize) -> u8 {
-        let mut bytes = [0; size_of::<Self>()];
-        BigEndian::write_u64(&mut bytes, *self);
-        bytes[level]
-    }
-}
-
-impl Byter for usize {
-    //TODO dynamic set
-    const LEVELS: usize = size_of::<u64>();
-    #[inline(always)]
-    fn bytes(&self, level: usize) -> u8 {
-        let mut bytes = [0; size_of::<u64>()];
-        BigEndian::write_u64(&mut bytes, *self as u64);
-        bytes[level]
-    }
-}
-
-impl Byter for u32 {
-    const LEVELS: usize = size_of::<Self>();
-    #[inline(always)]
-    fn bytes(&self, level: usize) -> u8 {
-        let mut bytes = [0; size_of::<Self>()];
-        BigEndian::write_u32(&mut bytes, *self);
-        bytes[level]
-    }
-}
-
-impl Byter for u16 {
-    const LEVELS: usize = size_of::<Self>();
-    #[inline(always)]
-    fn bytes(&self, level: usize) -> u8 {
-        let mut bytes = [0; size_of::<Self>()];
-        BigEndian::write_u16(&mut bytes, *self);
-        bytes[level]
-    }
-}
-
-impl Byter for u8 {
-    const LEVELS: usize = size_of::<Self>();
-    #[inline(always)]
-    fn bytes(&self, _level: usize) -> u8 {
-        *self
-    }
+    fn levels(&self) -> usize;
 }
 
 pub fn sort<T>(array: &mut [T])
 where T: Byter + Ord {
-    sort_by(array, <T as Byter>::LEVELS, |k, l| <T as Byter>::bytes(k, l))
+    let levels = array.iter().map(|t| t.levels()).max().unwrap_or_else(|| 0);
+    sort_by(array, levels, |k, l| <T as Byter>::bytes(k, l))
 }
 
 pub fn sort_by_key<T, K>(array: &mut [T], mut key: impl FnMut(&T) -> &K + Copy)
 where T: Ord, K: Byter {
-    sort_by(array, <K as Byter>::LEVELS, move |t, l| <K as Byter>::bytes(key(t), l))
+    let levels = array.iter().map(|t| key(t).levels()).max().unwrap_or_else(|| 0);
+    sort_by(array, levels, move |t, l| <K as Byter>::bytes(key(t), l))
 }
 
 #[inline]
@@ -89,6 +42,10 @@ fn sort_level<T>(
     num_levels: usize,
     key: impl FnMut(&T, usize) -> u8 + Copy,
 ) where T: Ord {
+    //FIXME handle empty vectors
+    //FIXME handle vectors of same prefix different lengths (distinguish zeroes)
+    //TODO repeat max depth check before recurring?
+
     if array.len() <= 1 {
         return
     }
@@ -179,6 +136,131 @@ impl Cache {
         self.cache.push(table)
     }
 }
+
+///////////////////////////////////////
+///////////////////////////////////////
+///////////////////////////////////////
+
+impl Byter for u64 {
+    #[inline(always)]
+    fn bytes(&self, level: usize) -> u8 {
+        let mut bytes = [0; size_of::<Self>()];
+        BigEndian::write_u64(&mut bytes, *self);
+        bytes[level]
+    }
+
+    #[inline(always)]
+    fn levels(&self) -> usize {
+       size_of::<Self>() 
+    }
+}
+
+impl Byter for usize {
+    //TODO dynamic set
+    #[inline(always)]
+    fn bytes(&self, level: usize) -> u8 {
+        let mut bytes = [0; size_of::<u64>()];
+        BigEndian::write_u64(&mut bytes, *self as u64);
+        bytes[level]
+    }
+
+    #[inline(always)]
+    fn levels(&self) -> usize {
+       size_of::<Self>() 
+    }
+}
+
+impl Byter for u32 {
+    #[inline(always)]
+    fn bytes(&self, level: usize) -> u8 {
+        let mut bytes = [0; size_of::<Self>()];
+        BigEndian::write_u32(&mut bytes, *self);
+        bytes[level]
+    }
+
+    #[inline(always)]
+    fn levels(&self) -> usize {
+       size_of::<Self>() 
+    }
+}
+
+impl Byter for u16 {
+    #[inline(always)]
+    fn bytes(&self, level: usize) -> u8 {
+        let mut bytes = [0; size_of::<Self>()];
+        BigEndian::write_u16(&mut bytes, *self);
+        bytes[level]
+    }
+
+    #[inline(always)]
+    fn levels(&self) -> usize {
+       size_of::<Self>() 
+    }
+}
+
+impl Byter for u8 {
+    #[inline(always)]
+    fn bytes(&self, _level: usize) -> u8 {
+        *self
+    }
+
+    #[inline(always)]
+    fn levels(&self) -> usize {
+       size_of::<Self>() 
+    }
+}
+
+impl Byter for String {
+    #[inline(always)]
+    fn bytes(&self, level: usize) -> u8 {
+        self.as_bytes().get(level).cloned().unwrap_or_else(|| 0)
+    }
+
+    #[inline(always)]
+    fn levels(&self) -> usize {
+       self.as_bytes().len()
+    }
+}
+
+impl<'a> Byter for &'a str {
+    #[inline(always)]
+    fn bytes(&self, level: usize) -> u8 {
+        self.as_bytes().get(level).cloned().unwrap_or_else(|| 0)
+    }
+
+    #[inline(always)]
+    fn levels(&self) -> usize {
+       self.as_bytes().len()
+    }
+}
+
+impl<'a> Byter for &'a [u8] {
+    #[inline(always)]
+    fn bytes(&self, level: usize) -> u8 {
+        self.get(level).cloned().unwrap_or_else(|| 0)
+    }
+
+    #[inline(always)]
+    fn levels(&self) -> usize {
+       self.len()
+    }
+}
+
+impl Byter for Vec<u8> {
+    #[inline(always)]
+    fn bytes(&self, level: usize) -> u8 {
+        self.get(level).cloned().unwrap_or_else(|| 0)
+    }
+
+    #[inline(always)]
+    fn levels(&self) -> usize {
+       self.len()
+    }
+}
+
+///////////////////////////////////////
+///////////////////////////////////////
+///////////////////////////////////////
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -316,7 +398,7 @@ pub mod tests {
     }
 
 
-     #[test]
+    #[test]
     fn stable() {
         let mut i = 0;
         let mut vals: Vec<(u64, u64)> = (0..10_000_000).map(|_| {
@@ -324,6 +406,68 @@ pub mod tests {
             (random(), i)
         }).collect();
         sort_by_key(&mut vals, |&(ref k,_)| k);
+        assert!(vals.iter().is_sorted());
+    }
+
+    #[test]
+    fn string_small_const() {
+        let mut vals = ["z", "a", "aaab", "aa", "ars", "nmo", "bbb", "alfa", "q", "11111111"];
+        sort(&mut vals);
+        println!("{:?}", vals);
+        assert!(vals.iter().is_sorted());
+    }
+
+
+    #[test]
+    fn vec_med_random() {
+        let mut rng = thread_rng();
+        let mut vals: Vec<Vec<u8>> = (0..100_000).map(|_|
+            (0..rng.gen_range(0, 100)).map(|_| random()).collect()
+        ).collect();
+        sort(&mut vals);
+        vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{:?} <= {:?}", w[0], w[1]));
+        assert!(vals.iter().is_sorted());
+    }
+
+    #[test]
+    fn vec_med_random_non_empty() {
+        let mut rng = thread_rng();
+        let mut vals: Vec<Vec<u8>> = (0..100_000).map(|_|
+            (0..rng.gen_range(1, 100)).map(|_| random()).collect()
+        ).collect();
+        sort(&mut vals);
+        vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{:?} <= {:?}", w[0], w[1]));
+        assert!(vals.iter().is_sorted());
+    }
+
+    #[test]
+    fn vec_zeroes() {
+        let mut vals = [
+            vec![0,0,0,0,0,0],
+            vec![0,0,0,0,0],
+            vec![0,0,0,0],
+            vec![0,0,0],
+            vec![0,0],
+            vec![0],
+            vec![0,0],
+            vec![0,0,0],
+            vec![0,0,0,0],
+            vec![0,0,0,0,0],
+        ];
+        sort(&mut vals);
+        println!("{:?}", vals);
+        vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{:?} <= {:?}", w[0], w[1]));
+        assert!(vals.iter().is_sorted());
+    }
+
+    #[test]
+    fn vec_zeroes_random_() {
+        let mut rng = thread_rng();
+        let mut vals: Vec<Vec<u8>> = (0..100_000).map(|_|
+            (0..rng.gen_range(1, 100)).map(|_| 0).collect()
+        ).collect();
+        sort(&mut vals);
+        vals.windows(2).for_each(|w| assert!(w[0] <= w[1], "{:?} <= {:?}", w[0], w[1]));
         assert!(vals.iter().is_sorted());
     }
 }
