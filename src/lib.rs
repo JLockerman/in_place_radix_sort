@@ -1,78 +1,96 @@
 
 extern crate byteorder;
 
+use std::mem::size_of;
+
 use byteorder::{BigEndian, ByteOrder};
 
 pub trait Byter {
-    const START_LEVEL: u8;
-    fn bytes(&self) -> u64;
+    const LEVELS: usize;
+    fn bytes(&self, usize) -> u8;
 }
 
 impl Byter for u64 {
-    const START_LEVEL: u8 = 0;
+    const LEVELS: usize = size_of::<Self>();
     #[inline(always)]
-    fn bytes(&self) -> u64 {
-        *self
+    fn bytes(&self, level: usize) -> u8 {
+        let mut bytes = [0; size_of::<Self>()];
+        BigEndian::write_u64(&mut bytes, *self);
+        bytes[level]
+        // unsafe {
+        //     *bytes.get_unchecked(level)
+        // }
     }
 }
 
 impl Byter for usize {
     //TODO dynamic set
-    const START_LEVEL: u8 = 0;
+    const LEVELS: usize = size_of::<u64>();
     #[inline(always)]
-    fn bytes(&self) -> u64 {
-        *self as u64
+    fn bytes(&self, level: usize) -> u8 {
+        let mut bytes = [0; size_of::<u64>()];
+        BigEndian::write_u64(&mut bytes, *self as u64);
+        bytes[level]
     }
 }
 
 impl Byter for u32 {
-    const START_LEVEL: u8 = 4;
+    const LEVELS: usize = size_of::<Self>();
     #[inline(always)]
-    fn bytes(&self) -> u64 {
-        *self as u64
+    fn bytes(&self, level: usize) -> u8 {
+        let mut bytes = [0; size_of::<Self>()];
+        BigEndian::write_u32(&mut bytes, *self);
+        bytes[level]
     }
 }
 
 impl Byter for u16 {
-    const START_LEVEL: u8 = 6;
+    const LEVELS: usize = size_of::<Self>();
     #[inline(always)]
-    fn bytes(&self) -> u64 {
-        *self as u64
+    fn bytes(&self, level: usize) -> u8 {
+        let mut bytes = [0; size_of::<Self>()];
+        BigEndian::write_u16(&mut bytes, *self);
+        bytes[level]
     }
 }
 
 impl Byter for u8 {
-    const START_LEVEL: u8 = 7;
+    const LEVELS: usize = size_of::<Self>();
     #[inline(always)]
-    fn bytes(&self) -> u64 {
-        *self as u64
+    fn bytes(&self, _level: usize) -> u8 {
+        *self
     }
 }
 
-pub fn sort<T: Byter>(array: &mut [T]) {
-    let mut memory: Vec<[usize; 256]> = Vec::with_capacity(8 * 2);
-    unsafe { memory.set_len(8 * 2) }
-    let (histograms, starts) = memory.split_at_mut(8);
-    sort_level(array, histograms, starts, <T as Byter>::START_LEVEL, <T as Byter>::bytes)
+pub fn sort<T>(array: &mut [T])
+where T: Byter + PartialOrd {
+    sort_by(array, <T as Byter>::LEVELS, |k, l| <T as Byter>::bytes(k, l))
 }
 
-pub fn sort_by<T>(array: &mut [T], key: impl FnMut(&T) -> u64 + Copy) {
-    let mut memory: Vec<[usize; 256]> = Vec::with_capacity(8 * 2);
-    unsafe { memory.set_len(8 * 2) }
-    let (histograms, starts) = memory.split_at_mut(8);
-    sort_level(array, histograms, starts, 0, key)
+pub fn sort_by<T>(array: &mut [T], num_levels: usize, key: impl FnMut(&T, usize) -> u8 + Copy)
+where T: PartialOrd {
+    let mut memory: Vec<[usize; 256]> = Vec::with_capacity(num_levels * 2);
+    unsafe { memory.set_len(num_levels * 2) }
+    let (histograms, starts) = memory.split_at_mut(num_levels);
+    assert_eq!(histograms.len(), num_levels);
+    assert_eq!(histograms.len(), starts.len());
+    sort_level(array, histograms, starts, 0, num_levels, key)
 }
 
+#[inline]
 fn sort_level<T>(
     array: &mut [T],
     histograms: &mut [[usize; 256]],
     starts: &mut [[usize; 256]],
-    level: u8,
-    mut key: impl FnMut(&T) -> u64 + Copy,
-) {
+    level: usize,
+    num_levels: usize,
+    key: impl FnMut(&T, usize) -> u8 + Copy,
+) where T: PartialOrd {
     if array.len() <= 1 {
         return
     }
+
+    assert!(level < num_levels);
 
     let mut byte = key_at_level(level, key);
 
@@ -112,21 +130,29 @@ fn sort_level<T>(
         }
     }
 
-    if level < 7 {
+    if level + 1 < num_levels {
         start[0] = 0;
         start[1..].copy_from_slice(&ends[..255]);
         for i in 0..start.len() {
             if start[i] == ends[i] { continue }
             if start[i] + 1 == ends[i] { continue }
+            //TODO cmove, e.g.:
+            // let mut swap_if_needed = |i, j| {
+            //     let n = min(array[i], array[j]);
+            //     let x = max(array[i], array[j]);
+            //     array[i] = n;
+            //     array[j] = x;
+            // };
+            // is noticeably faster, is there way to force it?
             let array = &mut array[start[i]..ends[i]];
             if array.len() == 2 {
-                if key(&array[0]) > key(&array[1]) {
+                if &array[0] > &array[1] {
                     array.swap(0, 1);
                 }
                 continue
             }
             if array.len() == 3 {
-                let mut swap_if_needed = |i, j| if key(&array[i]) > key(&array[j]) {
+                let mut swap_if_needed = |i, j| if &array[i] > &array[j] {
                     array.swap(i, j);
                 };
                 swap_if_needed(0, 1);
@@ -135,7 +161,7 @@ fn sort_level<T>(
                 continue
             }
             if array.len() == 4 {
-                let mut swap_if_needed = |i, j| if key(&array[i]) > key(&array[j]) {
+                let mut swap_if_needed = |i, j| if &array[i] > &array[j] {
                     array.swap(i, j);
                 };
                 swap_if_needed(0, 1);
@@ -163,19 +189,14 @@ fn sort_level<T>(
             //     swap_if_needed(6, 7);
             //     continue
             // }
-            sort_level(array, histograms, starts, level + 1, key);
+            sort_level(array, histograms, starts, level + 1, num_levels, key);
         }
     }
 }
 
 #[inline(always)]
-fn key_at_level<T>(level: u8, mut key: impl FnMut(&T) -> u64) -> impl FnMut(&T) -> u8 {
-    // move |t| ((key(t) >> level) & 0xff) as u8
-    move |t| { 
-        let mut bytes = [0; 8];
-        BigEndian::write_u64(&mut bytes, key(t));
-        bytes[level as usize]
-    }
+fn key_at_level<T>(level: usize, mut key: impl FnMut(&T, usize) -> u8) -> impl FnMut(&T) -> u8 {
+    move |k| key(k, level)
 }
 
 #[allow(dead_code)]
