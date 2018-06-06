@@ -2,7 +2,6 @@
 extern crate byteorder;
 
 use std::{
-    // collections::VecDeque,
     mem::{
         size_of,
         uninitialized,
@@ -23,9 +22,6 @@ impl Byter for u64 {
         let mut bytes = [0; size_of::<Self>()];
         BigEndian::write_u64(&mut bytes, *self);
         bytes[level]
-        // unsafe {
-        //     *bytes.get_unchecked(level)
-        // }
     }
 }
 
