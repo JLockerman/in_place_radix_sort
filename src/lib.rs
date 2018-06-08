@@ -18,32 +18,42 @@ pub trait Byter {
 pub fn sort<T>(array: &mut [T])
 where T: Byter + Ord {
     let levels = array.iter().map(|t| t.levels()).max().unwrap_or_else(|| 0);
-    sort_by(array, levels, |k, l| if l < <T as Byter>::levels(k) {
-            <T as Byter>::bytes(k, l) as u16 + 1
-        } else {
-            0
-        }
+    sort_by(array, levels, 
+        |k| <T as Byter>::levels(k),
+        |k, l| if l < <T as Byter>::levels(k) {
+                <T as Byter>::bytes(k, l) as u16 + 1
+            } else {
+                0
+            },
     )
 }
 
 pub fn sort_by_key<T, K>(array: &mut [T], mut key: impl FnMut(&T) -> &K + Copy)
 where T: Ord, K: Byter {
     let levels = array.iter().map(|t| key(t).levels()).max().unwrap_or_else(|| 0);
-    sort_by(array, levels, move |t, l| {
-        let k = key(t);
-        if l < <K as Byter>::levels(k) {
-            <K as Byter>::bytes(k, l) as u16 + 1
-        } else {
-            0
-        }
-    })
+    sort_by(array, levels,
+        move |t| <K as Byter>::levels(key(t)),
+        move |t, l| {
+            let k = key(t);
+            if l < <K as Byter>::levels(k) {
+                <K as Byter>::bytes(k, l) as u16 + 1
+            } else {
+                0
+            }
+        },
+    )
 }
 
 #[inline]
-pub fn sort_by<T>(array: &mut [T], num_levels: usize, key: impl FnMut(&T, usize) -> u16 + Copy)
+pub fn sort_by<T>(
+    array: &mut [T],
+    num_levels: usize,
+    leveler: impl FnMut(&T) -> usize + Copy,
+    key: impl FnMut(&T, usize) -> u16 + Copy,
+)
 where T: Ord {
     let mut tables = Cache::with_capacity(num_levels * 2);
-    sort_level(array, &mut tables, 0, num_levels, key)
+    sort_level(array, &mut tables, 0, num_levels, leveler, key)
 }
 
 #[inline]
@@ -52,6 +62,7 @@ fn sort_level<T>(
     tables: &mut Cache,
     level: usize,
     num_levels: usize,
+    mut leveler: impl FnMut(&T) -> usize + Copy,
     key: impl FnMut(&T, usize) -> u16 + Copy,
 ) where T: Ord {
     //FIXME handle empty vectors
@@ -113,7 +124,12 @@ fn sort_level<T>(
                     array.swap(0, 1);
                 },
                 l if l <= 25 => array.sort(),
-                _ => sort_level(array, tables, level + 1, num_levels, key),
+                _ => {
+                    if level + 1 >= array.iter().map(|t| leveler(t)).max().unwrap_or_else(|| 0) {
+                        continue
+                    }
+                    sort_level(array, tables, level + 1, num_levels, leveler, key)
+                },
             }
         }
     }
