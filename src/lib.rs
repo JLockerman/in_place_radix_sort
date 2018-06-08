@@ -18,17 +18,29 @@ pub trait Byter {
 pub fn sort<T>(array: &mut [T])
 where T: Byter + Ord {
     let levels = array.iter().map(|t| t.levels()).max().unwrap_or_else(|| 0);
-    sort_by(array, levels, |k, l| <T as Byter>::bytes(k, l))
+    sort_by(array, levels, |k, l| if l < <T as Byter>::levels(k) {
+            <T as Byter>::bytes(k, l) as u16 + 1
+        } else {
+            0
+        }
+    )
 }
 
 pub fn sort_by_key<T, K>(array: &mut [T], mut key: impl FnMut(&T) -> &K + Copy)
 where T: Ord, K: Byter {
     let levels = array.iter().map(|t| key(t).levels()).max().unwrap_or_else(|| 0);
-    sort_by(array, levels, move |t, l| <K as Byter>::bytes(key(t), l))
+    sort_by(array, levels, move |t, l| {
+        let k = key(t);
+        if l < <K as Byter>::levels(k) {
+            <K as Byter>::bytes(k, l) as u16 + 1
+        } else {
+            0
+        }
+    })
 }
 
 #[inline]
-pub fn sort_by<T>(array: &mut [T], num_levels: usize, key: impl FnMut(&T, usize) -> u8 + Copy)
+pub fn sort_by<T>(array: &mut [T], num_levels: usize, key: impl FnMut(&T, usize) -> u16 + Copy)
 where T: Ord {
     let mut tables = Cache::with_capacity(num_levels * 2);
     sort_level(array, &mut tables, 0, num_levels, key)
@@ -40,7 +52,7 @@ fn sort_level<T>(
     tables: &mut Cache,
     level: usize,
     num_levels: usize,
-    key: impl FnMut(&T, usize) -> u8 + Copy,
+    key: impl FnMut(&T, usize) -> u16 + Copy,
 ) where T: Ord {
     //FIXME handle empty vectors
     //FIXME handle vectors of same prefix different lengths (distinguish zeroes)
@@ -57,7 +69,7 @@ fn sort_level<T>(
     let mut histogram = tables.alloc();
     let mut start = tables.alloc();
 
-    *histogram = [0; 256];
+    *histogram = [0; 257];
 
     for item in &mut *array {
         histogram[byte(item) as usize] += 1;
@@ -74,7 +86,7 @@ fn sort_level<T>(
     }
 
     for dx in 0..start.len() {
-        let i = dx as u8;
+        let i = dx as u16;
         'search: while start[dx] < ends[dx] {
             'swap: loop {
                 let b = byte(&mut array[start[dx]]);
@@ -91,7 +103,7 @@ fn sort_level<T>(
 
     if level + 1 < num_levels {
         start[0] = 0;
-        start[1..].copy_from_slice(&ends[..255]);
+        start[1..].copy_from_slice(&ends[..256]);
         for i in 0..start.len() {
             if start[i] == ends[i] { continue }
             if start[i] + 1 == ends[i] { continue }
@@ -111,12 +123,12 @@ fn sort_level<T>(
 }
 
 #[inline(always)]
-fn key_at_level<T>(level: usize, mut key: impl FnMut(&T, usize) -> u8) -> impl FnMut(&T) -> u8 {
+fn key_at_level<T>(level: usize, mut key: impl FnMut(&T, usize) -> u16) -> impl FnMut(&T) -> u16 {
     move |k| key(k, level)
 }
 
 struct Cache {
-    cache: Vec<Box<[usize; 256]>>,
+    cache: Vec<Box<[usize; 257]>>,
 }
 
 impl Cache {
@@ -128,11 +140,11 @@ impl Cache {
     }
 
     #[inline]
-    pub fn alloc(&mut self) -> Box<[usize; 256]> {
+    pub fn alloc(&mut self) -> Box<[usize; 257]> {
         self.cache.pop().unwrap_or_else(|| Box::new(unsafe { uninitialized() }))
     }
 
-    pub fn free(&mut self, table: Box<[usize; 256]>) {
+    pub fn free(&mut self, table: Box<[usize; 257]>) {
         self.cache.push(table)
     }
 }
